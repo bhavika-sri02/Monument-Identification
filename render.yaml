@@ -1,0 +1,57 @@
+databases:
+  - name: monument-db
+    databaseName: monument_db
+    user: monument_user
+    plan: free
+
+services:
+  # 1. Redis Store for Background Queue
+  - type: keyvalue
+    name: monument-redis
+    plan: free
+    ipAllowList: []
+
+  # 2. FastAPI Web Service (Backend API)
+  - type: web
+    name: monument-api
+    env: python
+    buildCommand: "pip install -r backend/requirements.txt"
+    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port 10000"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: monument-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: monument-redis
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false  # You will enter this key in the Render Dashboard
+
+  # 3. Background Worker (Image processing & EXIF metadata)
+  - type: worker
+    name: monument-worker
+    env: python
+    buildCommand: "pip install -r backend/requirements.txt"
+    startCommand: "celery -A backend.worker worker --loglevel=info"
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: monument-redis
+          property: connectionString
+
+  # 4. Frontend Static Site (React/Vite)
+  - type: web
+    name: monument-frontend
+    env: static
+    buildCommand: "cd frontend && npm install && npm run build"
+    staticPublishPath: "./frontend/dist"
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: monument-api
+          property: url
